@@ -1,0 +1,259 @@
+log_path: log
+trace_save_path: exe_trace
+
+formatter: 
+  trash: trash/formatter
+  max_len_trash: 100
+  trash_file: trash.jsonl
+
+
+interpreter:
+  prompt_types: "I need to guess the type of answer for the following question: {}\n. 
+  The answer for that question should have one of the following formats:\n 
+    - Boolean: if the question have to be answered as Yes or no.
+    - String: If the answer have to be answered with text.
+    - Number: if the question expect a numerical answer
+    - List of string: if the question expect a list of texts.
+    - List of numbers: if the question needs a list of number to be answered.
+  It is really important for you to bear in mind the following KEY reasonings:
+    1. It is probable that some questions are worded in a rethoric way and not in a direct way.
+    2. Pay attention to the amount of answers the question spects, and return the correct typing accordingly (list or not)
+    3. Pay attention to the question, if it asks for names, then its names (there is no need to overthink) 
+  And finaly, answer with ```markdown and with ONLY the format (Boolean, Number, String, List of string or List of numbers)
+  That is, your answer has to be (Boolean, Number, String, List of string or List of numbers) surrounded by the ```markdown"
+
+  prompt: "For the question: {}\n 
+  The answer is: {}\n
+  we need the answer in the format {}. It is possible that the answer is already in that desirable format.
+  Interpret the answer and fit in the format {} of python. 
+  It is really important for you to bear in mind the following KEY reasonings:
+   1. Do not remove duplicates in arrays.
+   2. Do not parse randomly names to indices when a lists is returned
+   3. Never use parentheses or tuples.
+   4. Do not write the format type.
+  Response in a markdown with ```markdown and only with the formatted answer."
+
+  trash: trash/interpreter
+  max_len_trash: 100
+  trash_file: trash.jsonl
+
+reporter:
+  report_name: reports
+  trace_folder_name: exe_trace
+  trace_llm_folder_name: llm_trace
+  trace_filename: trace
+  exe_supervisor: supervisor.csv
+  
+keys:
+  explainer: meta
+  coder: qwen_25_coder
+  interpreter: qwen_25
+  default: qwen_25
+
+  # esto es pa testear si se quiere, recomiendo usar el de arriba
+  # pero bueno funca igual
+  meta: meta
+  llama: llama
+  bypass: bypass
+  qwen_25: qwen_25
+  qwen_25_coder: qwen_25_coder
+  phi_4: phi_4
+  zeus_gemma: zeus_gemma
+  gen5_gemma_9: gen5_gemma_9
+  gemma_9: gemma_9
+
+column_descriptor:
+  max_col_serialization: 10
+  freq_values: 10
+  template:
+    system: "In this task you will be presented with a subset of row of a table serialized as text.
+      Your objective is to obtain a description for all of the column that should describe what type of information will contain the table. 
+      The table will contain more values than those passed in the prompt. 
+      Try to provide a generic description. 
+      Please, generate the output in an array of json format where each json will have the following fields: '{}': with the column name, '{}': your description of the column"
+    user: "Columns to obtain descriptions: '{}' \n Table: '{}'"
+  path_cache_descriptions: tmp/columns_descriptions_Cache_Qwen25.json # "tmp/columns_descriptions_Cache.json" #"tests/assets/table_result.json" #
+
+databench_split : test
+test_data_url : "https://raw.githubusercontent.com/maxhormazabal/test_set_tableqa/refs/heads/main/{}"
+databench_path : "data/databenchENG/{}/databench_eng.csv"
+data_url_base : "hf://datasets/cardiffnlp/databench/data/{}/all.parquet"
+tabular_data_storage_path : "data/tabular_dataset/{}"
+
+explainer:
+  template: |
+    You are an AI assistant tasked with solving questions using a table.{}
+    You have the following columns available: {}
+    Your task is to break down the steps required to answer the following question: {}
+    Please list a maximum of {} steps required to manipulate the data to answer the question, but the best solution is the one that uses the minimum number of steps. 
+    The first steps should be casting or removing missing data only when it is needed for one or more columns.
+    The last step should induce to give a answer type according to the type the question implicitly requires (for example a number, boolean (True/False), a string, a list, etc.)
+    Don't round numbers unless is explictly requested in the query.
+    Don't write code, only precise and clear explanations.
+    Be very specific and clear in describing how each step manipulates the table. Separate the instructions in sentences separated by a "." symbol. Don't use enumerations, don't enumerate the steps, don't write a header or introduction, don't give code examples. Use complete column names to refer to the columns. Just write down the instructions. 
+    Many columns may have missing data or data that must be casted or preprocessed to avoid throwing exceptions.
+
+    Instructions:
+  correct_prompt: True
+  template_correction: |
+    You are an AI assistant. You will receive the column names of a table, a question, and a list of reasoning instructions to follow for obtaining the answer to that question.
+    Your task is to review the instructions and correct them because sometimes those instructions are incorrect.{}
+    The table has this columns: {}
+    The question was: {}
+    The original instructions to be corrected are: {}
+    Delete filtering instructions that are not needed. Be careful of not deleting useful filters of missing values.
+    The last instruction should induce to give a answer type according to the type the question implicitly requires (for example a number, boolean (True/False), a string, a list, etc.)
+    Be very specific and clear in describing how each step manipulates the table. The result must remain as a list of strings, as the original instructions. Don't write a header or introduction, don't give code examples. Use complete column names to refer to the columns. Just write down the instructions. Pay attention as many columns have missing data or data that must be casted or preprocessed to avoid throwing exceptions.
+    If everything is correct, just leave the same instructions, don't change anything.
+    Instructions:
+  trash: trash/explainer
+  trash_file: trash.jsonl
+  max_len_trash: 100
+
+
+coder:
+  template: "You are an AI assistant tasked with generating pandas code. You will receive a series of steps describing how to manipulate a DataFrame to answer a question.
+    The DataFrame has the following columns: {}.
+    The steps to manipulate the data are: {}.
+    Asume df is the name of the dataframe.
+    Your task is to generate pandas code that executes these steps and returns the result. 
+    If the result of the operation is a list, boolean, int or float cast them to a string but do not return full formed sentences (e.g. if the output is boolean return just str(True) or str(False)).
+    Make sure you write only python code and nothing else.
+    Make sure the code only returns a variable with name 'result', no DataFrame or other types of objects.
+    Make sure you use the names of the columns of the DataFrame exactly as they are provided.
+    Make sure to not provide any examples on how to run the code.
+    Make sure to try to work everything only on single function.
+    You are not allowed to use the groupby method of Pandas.
+    
+    In summary, complete the following function
+    ```python
+    def parse_dataframe(df: pd.DataFrame) -> str:
+      ...
+    ```
+    "
+  template_persist: "You are an AI assistant tasked with generating pandas code. You will receive a series of steps describing how to manipulate a DataFrame to answer a question.
+    The DataFrame has the following columns: {}.
+    The steps to manipulate the data are: {}.
+    Asume df is the name of the dataframe.
+    Your task is to generate pandas code that executes these steps and returns the result as a Python string.
+    Make sure you write only python code and nothing else.
+    Make sure the code only returns a variable with name 'result', no DataFrame or other types of objects.
+    Make sure to not provide any examples on how to run the code.
+    Make sure to try to work everything only on single function.
+    
+    In summary, complete the following function
+    ```python
+    def parse_dataframe(df: pd.DataFrame) -> str:
+      ...
+    ```
+    Take in to account that the following answer generated an exception.
+    Previous answer: {}
+    So, your anwser cannot be the same that the previouse answert. To correct it, take into account the following trace of the exception:
+    Exception generated: {}
+
+    "
+  correction_template: "You are an AI assintant tasked with helping other people Fix code. You will receive a code snippet that doesn't work syntactically and have the task to fix it.
+    The code in question is the following: ```python {}\n ```
+    Do not change the name of the function, the name or type of the inputs nor the type of the outputs.
+    Fix whathever semantic / syntactic problem the function has.
+    Make sure you answer with only python code and nothing else.
+    Do not provide example usage of the function.
+  "  
+  trash: trash/coder
+  max_len_trash: 100
+  trash_file: trash.jsonl
+
+llm_inference:
+  # model_path: /opt/models/gguf/Meta-Llama-3-70B-Instruct-GGUF/Meta-Llama-3-70B-Instruct.Q2_K.gguf 
+  # model_type: llama
+  keep_models: false
+  load_params:
+    gen5_gemma_9:
+      model_path: zelk12/MT4-Gen5-gemma-2-9B
+    zeus_gemma:
+      model_path: T145/ZEUS-8B-V16
+    gemma_9:
+      model_path: google/gemma-2-9b-it
+    phi_4:
+      model_path: microsoft/phi-4
+    qwen_25:
+      model_path: Qwen/Qwen2.5-{tam}B-Instruct
+      tam: "14"
+    qwen_25_coder:
+      model_path: Qwen/Qwen2.5-Coder-{tam}B-Instruct
+      tam: "14" 
+    meta:
+      task: text-generation
+      model_path: /opt/models/download/Meta-Llama-3-8B-Instruct-hf/
+    llama:
+      model_path: /opt/models/gguf/Meta-Llama-3-70B-Instruct-GGUF/Meta-Llama-3-70B-Instruct.Q2_K.gguf 
+      n_ctx: 2048
+      n_gpu_layers: -1
+      verbose: true
+    openai:
+      model: gpt-4o-mini
+    llama_1b:
+      model_path: meta-llama/Llama-3.2-1B 
+
+  infer_params:
+    bypass:
+      time: 0.1
+      default_text: "Esto es una respuesta del llm con un array incluido: ['respuesta1','respuesta2']"
+    llama:
+      max_tokens: 50
+      temperature: 0.3
+      top_p: 0.1
+      echo: true
+      stop: ["Q","\n"]
+    meta: 
+      max_new_tokens: 1024
+      do_sample: true
+      temperature: 0.6
+      top_p: 0.9
+    llama_1b:
+      max_new_tokens: 50
+      do_sample: true
+      temperature: 0.1
+      top_p: 0.3
+    qwen_25:
+      config:
+        max_new_tokens: 1024
+        do_sample: true
+        temperature: 0.1
+        top_p: 0.3 
+      sysprompt: "You are Qwen, created by Alibaba Cloud. You are a helpful assistant." # default de hf    
+    qwen_25_coder:
+      config:
+        max_new_tokens: 1024
+        do_sample: true
+        temperature: 0.1
+        top_p: 0.3 
+      sysprompt: "You are Qwen, created by Alibaba Cloud. You are a helpful assistant." # default de hf
+    phi_4:
+      config:
+        max_new_tokens: 1024
+        do_sample: true
+        temperature: 0.1
+        top_p: 0.3 
+      sysprompt: "You are a helpfull assisntant. You listen to what you are told, follow the instructions and the format required. Be mindfull and think before you answer."
+    gen5_gemma_9:
+      config:
+        max_new_tokens: 1024
+        do_sample: true
+        temperature: 0.1
+        top_p: 0.3 
+      sysprompt: "You are a helpfull assisntant. You listen to what you are told, follow the instructions and the format required. Be mindfull and think before you answer."
+    zeus_gemma:
+      config:
+        max_new_tokens: 1024
+        do_sample: true
+        temperature: 0.1
+        top_p: 0.3 
+      sysprompt: "You are a helpfull assisntant. You listen to what you are told, follow the instructions and the format required. Be mindfull and think before you answer."
+    gemma_9:
+      config:
+        max_new_tokens: 1024
+        do_sample: true
+        temperature: 0.1
+        top_p: 0.3 
+      sysprompt: "You are a helpfull assisntant. You listen to what you are told, follow the instructions and the format required. Be mindfull and think before you answer."

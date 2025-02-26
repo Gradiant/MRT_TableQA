@@ -1,0 +1,77 @@
+[project]
+name = "tqa"
+version = "0.3.7"
+description = "generic descripction for generic module"
+authors = [{ name = "Álvaro Bueno Sáez", email = "abueno@gradiant.org" }]
+dependencies = [
+    "click<9.0.0,>=8.1.7",
+    "SQLAlchemy<3.0.0,>=2.0.23",
+    "fastapi<1.0.0,>=0.104.1",
+    "psycopg2-binary<3.0.0,>=2.9.9",
+    "pydantic-settings<3.0.0,>=2.1.0",
+    "loguru>=0.7.2",
+    "pyyaml>=6.0.2",
+    "pandas>=2.2.3",
+    "accelerate>=1.0.1",
+    "datasets>=3.0.2",
+    "langchain-openai>=0.2.3",
+    "joblib>=1.4.2",
+    "autopep8>=2.3.1",
+    "autoflake>=2.3.1",
+    "openpyxl>=3.1.5",
+    "pytest>=8.3.4",    
+]
+requires-python = ">=3.11,<4.0"
+readme = "README.md"
+
+[project.optional-dependencies]
+dev = [
+    "pylint<3.0.0,>=2.14.5",
+    "black<23.0.0,>=22.6.0",
+    "flake8<8.0.0,>=7.0.1",
+    "pre-commit<3.0.0,>=2.20.0",
+    "isort>=5.12.0",
+    "safety>=3.2.6",
+    "llama-cpp-python>=0.3.1",
+    "transformers==4.48.0",
+    "torch>=2.3.1",
+]
+test = ["pytest>=7.4.2", "pytest-cov>=4.1.0"]
+
+[tool.pdm.build]
+includes = []
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+[tool.black]
+line-length = 88
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest]
+log_cli = true
+log_level = "DEBUG"
+
+
+[tool.pytest.ini_options]
+addopts = "-s"
+
+# [project.scripts]
+# tqa = "tqa.cli:main"

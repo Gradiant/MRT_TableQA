@@ -1,0 +1,27 @@
+[
+  {"table_num": 0,
+    "table_name": "001_Forbes.csv",
+    "Question":"Is the person with the highest net worth self-made?",
+    "Instructions": ["Sort the table in descending order based on the 'finalWorth' column to identify the person with the highest net worth", "Get the row index of the person with the highest net worth by using the index method on the sorted table", "Filter the original table to get the row corresponding to the person with the highest net worth and check the'selfMade' column to determine if they are self-made"]
+  },
+  {"table_num": 1,
+    "table_name": "002_Titanic.csv",
+    "Question":"Were there any female passengers in the 3rd class who survived?",
+    "Instructions": ["Filter the table to include only rows where the 'Pclass' column equals 3, indicating 3rd class passengers", "Filter the table to include only rows where the 'Sex' column equals 'female', indicating female passengers", "Return the 'Survived' column for the filtered rows, checking if any of the filtered female 3rd class passengers survived"]
+    },
+    {"table_num": 1,
+    "table_name": "002_Titanic.csv",
+    "Question":"Were there any female passengers in the 3rd class who survived?",
+    "Instructions": ["Filter the table to include only rows where the 'Pclass' column is equal to 3, indicating 3rd class passengers", "Select only the rows where the 'Sex' column is equal to 'female'", "Select only the rows where the 'Survived' column is equal to true, indicating passengers who survived"]
+    },
+  {"table_num": 1,
+    "table_name": "002_Titanic.csv",
+    "Question":"Is every passenger's name unique?",
+    "Instructions": ["The table needs to be filtered to only include the 'Name' column, which can be done by selecting only the 'Name' column from the original table", "The resulting table should then be converted into a set data structure, which automatically removes any duplicate values, allowing for a quick check on the uniqueness of the names", "Finally, the length of the set should be compared to the original number of rows in the table, if the lengths are equal, then every passenger's name is unique, otherwise, there are duplicate names"]
+    },
+  {"table_num": 3,
+    "table_name": "004_Taxi.csv",
+    "Question":"On which date did the first recorded trip occur?",
+    "Instructions":["The table is sorted by the 'tpep_pickup_datetime' column in ascending order, so the earliest recorded trip is at the top of the table", "The 'tpep_pickup_datetime' column is converted to a datetime format, allowing for easy extraction of the date", "The 'tpep_pickup_datetime' column is then selected to extract the date of the first recorded trip"]
+    }
+]
