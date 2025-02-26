@@ -185,4 +185,4 @@ This test generates a file *table_result.json* with the descriptions of the colu
 **_This project was developed by [Gradiant](https://www.gradiant.org)._**
 
 ## License
-BIC is licensed under the Mozilla Public License v2.0 - see the [LICENSE](LICENSE) file for details
+This repository is licensed under the Mozilla Public License v2.0 - see the [LICENSE](LICENSE) file for details
