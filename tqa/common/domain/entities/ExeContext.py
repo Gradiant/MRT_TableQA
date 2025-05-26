@@ -56,6 +56,13 @@ class exeContext(metaclass=SingletonMeta):
         answer: str = "",
         use_model: str = "",
     ):
+
+        logger.info("EXE Question {} Table Name {} Answer {} Use model {}".format(
+            question,
+            table_name,
+            answer,
+            use_model))
+        
         for exe_id, exe in self.executions.items():
 
             if exe.question == question and exe.table_name == table_name:
@@ -73,6 +80,9 @@ class exeContext(metaclass=SingletonMeta):
         answer: str = "",
         use_model: str = "",
     ):
+
+        logger.info("GETNEW EXE Question {} Table Name {} Answer {} Use model {}".format(question, table_name, answer, use_model))
+        
         exe = self.get(question, table_name, answer, use_model)
         if not exe:
             return self.new(question, table_name, answer, use_model)

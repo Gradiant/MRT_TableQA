@@ -163,7 +163,7 @@ class ColumnDescriptorService(Service):
                 _num_unique_values = None
 
             _is_binary = df[_column].isin([0, 1]).all()
-
+            example_values = None
             if is_numeric_dtype(df[_column].dtype):
                 _mean = df[_column].mean()
                 _std = df[_column].std()
@@ -189,8 +189,14 @@ class ColumnDescriptorService(Service):
                         .index.tolist()
                     ]
 
+
                 else:
                     most_freq_values = None
+                    example_values = (
+                        [str(_obj) for _obj in df[_column][0:5] if _obj]
+                        if len(df) > 5
+                        else None
+                    )
 
             table_info["columns"].append(
                 {
@@ -204,6 +210,7 @@ class ColumnDescriptorService(Service):
                     "min": float(_min),
                     "max": float(_max),
                     "freq_values": most_freq_values,
+                    "example_values": example_values,
                 }
             )
 
@@ -213,7 +220,7 @@ class ColumnDescriptorService(Service):
         system_template = (
             self.service_config.get("template", {})
             .get("system")
-            .format("name", "description")
+            .format("name", "description", "simple_name")
         )
 
         user_template = (

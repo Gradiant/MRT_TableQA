@@ -8,38 +8,18 @@ from datasets import load_dataset
 
 from tqa.common.configuration.config import load_config
 
-def get_databench_split():
-    config = load_config()
-    return config["databench_split"]
-
-def get_databench_path():
-    config = load_config()
-    databench_split = config["databench_split"]
-    databench_path = config["databench_path"]
-    return databench_path.format(databench_split)
-
-def get_tabular_data_url():
-    config = load_config()
-    return config["data_url_base"]
-
-def get_tabular_data_storage():
-    config = load_config()
-    tabular_data_storage_path = config["tabular_data_storage_path"]
-    databench_split = config["databench_split"]
-    return tabular_data_storage_path.format(databench_split)
-
-def get_test_data_url():
-    config = load_config()
-    return config["test_data_url"]
-
-databench_split = get_databench_split()
-databench_path = get_databench_path()
-data_url_base = get_tabular_data_url()
-tabular_data_storage = get_tabular_data_storage()
-test_data_url = get_test_data_url()
-
+CONFIG = load_config()
 
 class Dataset:
+
+    databench_split = CONFIG.get("databench_split")
+    databench_path = CONFIG.get("databench_path").format(CONFIG.get("databench_split"))
+    data_url_base = CONFIG.get("data_url_base")
+    tabular_data_storage = CONFIG.get("tabular_data_storage_path").format(CONFIG.get("databench_split"))
+    test_data_url = CONFIG.get("test_data_url")
+    load_dataset_route = CONFIG.get("load_dataset_route")
+    load_dataset_name = CONFIG.get("load_dataset_name")
+
     def __init__(self, storage_folder=tabular_data_storage):
         self.storage_folder = storage_folder
         self.databench_df = None
@@ -47,23 +27,21 @@ class Dataset:
         self.ensure_datasets_downloaded()
 
     def load_databench(self):
-        # print(f"{'-'*40}\nChecking Databench QA Pairs Existence\n{'-'*40}")
-        # print(f"{'-'*40}\nDataset Split: {databench_split}\n{'-'*40}")
-        if not os.path.isfile(databench_path):
-            os.makedirs(os.path.split(databench_path)[0], exist_ok=True)
-            if databench_split == "test":
-                qa_pairs = pd.read_csv(test_data_url.format("test_qa.csv"))
-                qa_pairs.to_csv(databench_path, index= False)
+
+        if not os.path.isfile(self.databench_path):
+            os.makedirs(os.path.split(self.databench_path)[0], exist_ok=True)
+            if self.databench_split == "test":
+                qa_pairs = pd.read_csv(self.test_data_url.format("test_qa.csv"))
+                qa_pairs.to_csv(self.databench_path, index= False)
             else:
                 qa_pairs = load_dataset(
-                    "cardiffnlp/databench", name="semeval", split=databench_split
+                    self.load_dataset_route, name=self.load_dataset_name, split=self.databench_split
                 )
-                qa_pairs.to_csv(databench_path)
-        self.databench_df = pd.read_csv(databench_path, low_memory=False)
+                qa_pairs.to_csv(self.databench_path)
+        self.databench_df = pd.read_csv(self.databench_path, low_memory=False)
 
     def ensure_datasets_downloaded(self):
-        # print(f"{'-'*40}\nChecking Tabular Dataset Existence\n{'-'*40}")
-        # print(f"{'-'*40}\nDataset Split: {databench_split}\n{'-'*40}")
+
         os.makedirs(self.storage_folder, exist_ok=True)
 
         datasets = self.databench_df["dataset"].unique()
@@ -76,10 +54,10 @@ class Dataset:
         # print(f"{'-'*40}\nTabular Dataset: OK\n{'-'*40}")
 
     def download_dataset(self, dataset_name):
-        if databench_split == "test":
-            dataset_url = test_data_url.format(dataset_name) + "/all.parquet"
+        if self.databench_split == "test":
+            dataset_url = self.test_data_url.format(dataset_name) + "/all.parquet"
         else:
-            dataset_url = data_url_base.format(dataset_name)
+            dataset_url = self.data_url_base.format(dataset_name)
         dataset_path = os.path.join(self.storage_folder, f"{dataset_name}.csv")
         dataset_df = pd.read_parquet(dataset_url)
         dataset_df.to_csv(dataset_path, index=False)
@@ -95,7 +73,7 @@ class Dataset:
             dataset = pd.read_csv(dataset_path, low_memory=False)
             dataset = self.clean_column_names(dataset)
             filtered = self.databench_df[self.databench_df["dataset"] == dataset_name]
-            if databench_split == "test":
+            if self.databench_split == "test":
                 fields = ["question"]
             else:
                 fields = ["question", "answer", "type"]

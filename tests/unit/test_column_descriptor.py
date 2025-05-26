@@ -14,6 +14,7 @@ from tqa.coder.controllers.controller import CoderController
 from tqa.common.configuration.config import load_config
 from tqa.common.configuration.logger import get_logger
 from tqa.common.utils import ensure_path, read_json
+from tqa.common.domain.entities.Dataset import Dataset
 
 load_dotenv()
 logger = get_logger("tests")
@@ -118,45 +119,48 @@ def test_all_tables():
 
 
 def test_one():
-    table_name = "037_Ted"
-    df = pd.read_parquet(
-        f"hf://datasets/cardiffnlp/databench/data/{table_name}/all.parquet"
-    )
+    dataset_service = Dataset()
+
+    databench = dataset_service.get_data()
+
+    table_set = databench[4]
+    df = dataset_service.get_tabular_df(table_set["table_name"])
+
     controller = CoderController()
-    result = controller.describe_columns(df, table_name)
+    result = controller.describe_columns(df, table_set["table_name"])
     print(result)
     assert result
 
 
-def test_all_tables():
+# def test_all_tables():
 
-    # Read input data
-    # Load SemEval 2025 task 8 Question-Answer splits
-    semeval_train_qa = load_dataset(
-        "cardiffnlp/databench", name="semeval", split="train"
-    )
+#     # Read input data
+#     # Load SemEval 2025 task 8 Question-Answer splits
+#     semeval_train_qa = load_dataset(
+#         "cardiffnlp/databench", name="semeval", split="train"
+#     )
 
-    # A small chache to store analysed datasets
-    analysed_datasets = {}
+#     # A small chache to store analysed datasets
+#     analysed_datasets = {}
 
-    controller = CoderController()
-    # Do the same for semeval_dev_qa??
-    for ds_id in semeval_train_qa["dataset"]:
+#     controller = CoderController()
+#     # Do the same for semeval_dev_qa??
+#     for ds_id in semeval_train_qa["dataset"]:
 
-        print("DS ID", ds_id)
+#         print("DS ID", ds_id)
 
-        if ds_id in analysed_datasets:
-            continue
+#         if ds_id in analysed_datasets:
+#             continue
 
-        print("Reading table")
+#         print("Reading table")
 
-        # Reading the table
-        df = pd.read_parquet(
-            f"hf://datasets/cardiffnlp/databench/data/{ds_id}/all.parquet"
-        )
+#         # Reading the table
+#         df = pd.read_parquet(
+#             f"hf://datasets/cardiffnlp/databench/data/{ds_id}/all.parquet"
+#         )
 
-        print("Describing column")
+#         print("Describing column")
 
-        # in fork
-        result = controller.describe_columns(df, ds_id)
-        analysed_datasets[ds_id] = result
+#         # in fork
+#         result = controller.describe_columns(df, ds_id)
+#         analysed_datasets[ds_id] = result

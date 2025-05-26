@@ -87,6 +87,8 @@ class Reporter(Service):
 
     def _match_function(self, pred_value, true_value):
         if true_value:
+            true_value = "False" if true_value=="false" or true_value==False else true_value
+            true_value = "True" if true_value=="true" or true_value==True else true_value
             return str(eval_secure(pred_value)).strip() == str(eval_secure(true_value)).strip()
         else:
             return False
@@ -112,6 +114,10 @@ class Reporter(Service):
             "use_model": context.use_model if not use_model else use_model,
         }
         file_entry = dict(file_entry, **kargs)
+
+        for k, v in file_entry.items():
+            if isinstance(v, pd.DataFrame):
+                file_entry[k] = "Dataframe modified (not showed due to space)"
 
         file_entry["match"] = self._match_function(
             file_entry.get("result"), file_entry.get("answer")
@@ -369,8 +375,8 @@ class Reporter(Service):
                 if "pred" not in csv.columns:
                     csv["pred"]=csv["formatter"]
                 if "answer" in csv.columns:
-                    if not name.startswith("test_"):
-                        csv["true"]=csv["answer"]
+                    # if not name.startswith("test_"):
+                    csv["true"]=csv["answer"]
                 data[name] = csv 
                 data[name]["match"] = data[name].apply(
                     lambda row: self._match_function(row["pred"], row["true"] if "true" in row else None), axis=1
