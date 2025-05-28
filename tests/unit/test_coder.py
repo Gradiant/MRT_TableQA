@@ -1,4 +1,4 @@
-from tqa.coder.domain.services.service import CoderService
+from tqa.coder.domain.services.CoderService import CoderService
 from tqa.common.domain.services.InferenceService import InferenceService
 
 
@@ -202,3 +202,11 @@ def other():
 
     for llm, parsed in elements:
         assert parsed == service.parse_llm_answer(llm)
+
+
+def test_read_internal_function():
+    coder = CoderService()
+    assert coder.internal_functions_descriptions, "No internal functions"
+    print(coder.internal_functions_descriptions)
+
+

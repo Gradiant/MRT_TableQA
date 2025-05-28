@@ -3,7 +3,7 @@ import os
 from typing import Dict, List
 
 import pandas as pd
-
+from tqdm import tqdm
 from tqa.coder.domain.services.column_descriptor_service import ColumnDescriptorService
 from tqa.common.domain.entities.ExeContext import exeContext
 from tqa.common.domain.services.InferenceService import InferenceService
@@ -63,7 +63,7 @@ class ColumnDescriptorUseCase(BaseUseCase):
 
         results = []
 
-        for _table in serialization_list:
+        for _table in tqdm(serialization_list,"Processing columns"):
 
             error_response = None
 

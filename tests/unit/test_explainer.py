@@ -5,6 +5,7 @@ from tqa.coder.domain.services.service import ExplainerService
 from tqa.common.domain.services.InferenceService import InferenceService
 from tqa.common.domain.entities.ExeContext import exeContext
 
+
 def test_template_basic_format():
     service = ExplainerService()
     prompt = service.get_prompt(
@@ -15,7 +16,18 @@ def test_template_basic_format():
     )
     assert (
         prompt
-        == "You are an AI assistant tasked with solving questions using a table.\nYou have the following columns available: ['edad', 'nombre', 'apellidos', 'ciudad', 'trabajo']\nYour task is to break down the steps required to answer the following question: ¿Cuál es la edad máxima?\nPlease list a maximum of 5 steps required to manipulate the data to answer the question, but if you can use less, it's better: keep it simple.\nThe last step should induce to give a answer type according to the type the question implicitly requires (for example a number, boolean (True/False), a string, a list, etc.)\nBe very specific and clear in describing how each step manipulates the table. Separate the instructions in sentences separated by a \".\" symbol. Don't use enumerations, don't enumerate the steps, don't write a header or introduction, don't give code examples. Use complete column names to refer to the columns. Just write down the instructions. Pay attention as many columns have missing data or data that must be casted or preprocessed to avoid throwing exceptions.\nInstructions:\n"
+        == """You are an AI assistant tasked with solving questions using a table.
+You have the following columns available: ['edad', 'nombre', 'apellidos', 'ciudad', 'trabajo']
+Your task is to break down the steps required to answer the following question: ¿Cuál es la edad máxima?
+Please list a maximum of 5 steps required to manipulate the data to answer the question, but the best solution is the one that uses the minimum number of steps. 
+The first steps should be casting or removing missing data only when it is needed for one or more columns.
+The last step should induce to give a answer type according to the type the question implicitly requires (for example a number, boolean (True/False), a string, a list, etc.)
+Don't round numbers unless is explictly requested in the query.
+Don't write code, only precise and clear explanations.
+Be very specific and clear in describing how each step manipulates the table. Separate the instructions in sentences separated by a "." symbol. Don't use enumerations, don't enumerate the steps, don't write a header or introduction, don't give code examples. Use complete column names to refer to the columns. Just write down the instructions. 
+Many columns may have missing data or data that must be casted or preprocessed to avoid throwing exceptions.
+
+Instructions:\n"""
     )
 
 
@@ -32,8 +44,27 @@ def test_template_format_with_columdesc():
     )
     assert (
         prompt
-        == "You are an AI assistant tasked with solving questions using a table.\nThe name of the table is: Empleados.\nYou have the following columns available: \n- \"edad\": Age of the person. Type: uint16. The range of values goes from 2 (min) to 24 (max).\n- \"nombre\": name of the person. Type: str.\n- \"apellidos\": surnames of the person. Type: str.\n- \"ciudad\": city where he/she lives. Type: category. Options are: Madrid, Barcelona.\n- \"trabajo\": job the person has. Type: str.\nYour task is to break down the steps required to answer the following question: ¿Cuál es la edad máxima?\nPlease list a maximum of 5 steps required to manipulate the data to answer the question, but if you can use less, it's better: keep it simple.\nThe last step should induce to give a answer type according to the type the question implicitly requires (for example a number, boolean (True/False), a string, a list, etc.)\nBe very specific and clear in describing how each step manipulates the table. Separate the instructions in sentences separated by a \".\" symbol. Don't use enumerations, don't enumerate the steps, don't write a header or introduction, don't give code examples. Use complete column names to refer to the columns. Just write down the instructions. Pay attention as many columns have missing data or data that must be casted or preprocessed to avoid throwing exceptions.\nInstructions:\n"
+        == 'You are an AI assistant tasked with solving questions using a table.\nThe name of the table is: Empleados.\nYou have the following columns available: \n- "edad": Age of the person. Type: uint16. The range of values goes from 2 (min) to 24 (max).\n- "nombre": name of the person. Type: str.\n- "apellidos": surnames of the person. Type: str.\n- "ciudad": city where he/she lives. Type: category. Options are: Madrid, Barcelona.\n- "work": job the person has. Type: str.\nYour task is to break down the steps required to answer the following question: ¿Cuál es la edad máxima?\nPlease list a maximum of 5 steps required to manipulate the data to answer the question, but if you can use less, it\'s better: keep it simple.\nThe last step should induce to give a answer type according to the type the question implicitly requires (for example a number, boolean (True/False), a string, a list, etc.)\nBe very specific and clear in describing how each step manipulates the table. Separate the instructions in sentences separated by a "." symbol. Don\'t use enumerations, don\'t enumerate the steps, don\'t write a header or introduction, don\'t give code examples. Use complete column names to refer to the columns. Just write down the instructions. Pay attention as many columns have missing data or data that must be casted or preprocessed to avoid throwing exceptions.\nInstructions:\n'
     )
+
+
+def test_template_simple_name_duplicated():
+    column_descriptions = get_example_column_description()
+    column_descriptions["columns"][0]["description"]["simple_name"] = "work"
+    column_descriptions["columns"][3]["description"]["simple_name"] = "work"
+    service = ExplainerService()
+    prompt = service.get_prompt(
+        "¿Cuál es la edad máxima?",
+        ["edad", "nombre", "apellidos", "ciudad", "trabajo"],
+        column_descriptions,
+        5,
+        max_categories_for_describe=4,
+        table_name="Empleados",
+    )
+    assert "work" in prompt
+    assert "work_1" in prompt
+    assert "work_2" in prompt
+
 
 def test_template_correct_instructions():
     column_descriptions = get_example_column_description()
@@ -258,9 +289,7 @@ def test_correct_dataset_dev_50():
 
 def template_test_with_dataset(question, id_table, table_name):
 
-    execution = exeContext().get_or_new(
-        question=question, table_name=table_name
-    )
+    execution = exeContext().get_or_new(question=question, table_name=table_name)
     exeContext().set_current(exe_id=execution.exe_id)
 
 
@@ -274,33 +303,38 @@ def template_test_with_dataset(question, id_table, table_name):
     llm_answer = inferer.inference("meta", prompt)
     print("\n" + table_name)
     print(question)
-    print(llm_answer+ "\n")
+    print(llm_answer + "\n")
     instructions = service.parse_llm_answer(llm_answer)
     print(instructions)
     print("\nSize instructions: " + str(len(instructions)))
     print("\n----------------------------------------------\n")
 
 
-def template_test_with_dataset_correction(question, id_table, table_name, id_columntable=None):
+def template_test_with_dataset_correction(
+    question, id_table, table_name, id_columntable=None
+):
 
     if not id_columntable:
         id_columntable = id_table
 
-    execution = exeContext().get_or_new(
-        question=question, table_name=table_name
-    )
+    execution = exeContext().get_or_new(question=question, table_name=table_name)
     exeContext().set_current(exe_id=execution.exe_id)
 
     df = utils.get_table_from_dataset(id_table)
     service = ExplainerService()
-    columns_description = get_column_description_from_table(id_columntable, table_name=table_name)
+    columns_description = get_column_description_from_table(
+        id_columntable, table_name=table_name
+    )
     prompt = service.get_prompt(question, df.columns, columns_description, 3)
     inferer = InferenceService()
 
     llm_answer = inferer.inference("meta", prompt)
-    print("########################################################################\n" + table_name)
+    print(
+        "########################################################################\n"
+        + table_name
+    )
     print(question)
-    print("  ##  LLM ANSWER:\n")# + llm_answer+ "\n")
+    print("  ##  LLM ANSWER:\n")  # + llm_answer+ "\n")
     instructions = service.parse_llm_answer(llm_answer)
     for ins in instructions:
         print(ins)
@@ -321,20 +355,18 @@ def template_test_with_dataset_correction(question, id_table, table_name, id_col
             max_categories_for_describe=7,
             table_name=table_name,
         )
-        #print("-------------")
-        #print(prompt_correction)
-        #print("-------------")
 
         llm_answer_corrected = inferer.inference("meta", prompt_correction)
-        instructions_corrected =  service.parse_llm_answer_corrected(llm_answer_corrected, instructions)
+        instructions_corrected = service.parse_llm_answer_corrected(
+            llm_answer_corrected, instructions
+        )
         print("Corrected result: ")
         for ins in instructions_corrected:
             print(str(ins))
-        #print("instructions_corrected: " + str(instructions_corrected))
+        # print("instructions_corrected: " + str(instructions_corrected))
     else:
         print("Not correcting prompt")
     print("\n----------------------------------------------\n")
-
 
 
 def get_column_description_from_table(id_table, table_name=None):
@@ -342,7 +374,7 @@ def get_column_description_from_table(id_table, table_name=None):
     path_to_descriptions = "tests/assets/table_result.json"
     with open(path_to_descriptions, "r") as file:
         data = json.load(file)
-    
+
     if table_name:
         for table in data:
             if table == table_name:
@@ -361,12 +393,18 @@ def get_example_column_description():
                 "type": "uint16",
                 "min": 2,
                 "max": 24,
-                "description": {"description": "Age of the person."},
+                "description": {
+                    "description": "Age of the person.",
+                    "simple_name": "edad",
+                },
             },
             {
                 "name": "nombre",
                 "type": "str",
-                "description": {"description": "name of the person."},
+                "description": {
+                    "description": "name of the person.",
+                    "simple_name": "nombre",
+                },
             },
             {
                 "name": "apellidos",
@@ -383,9 +421,11 @@ def get_example_column_description():
             {
                 "name": "trabajo",
                 "type": "str",
-                "description": {"description": "job the person has."},
+                "description": {
+                    "description": "job the person has.",
+                    "simple_name": "work",
+                },
             },
         ],
         "binary_subsets": [],
     }
-

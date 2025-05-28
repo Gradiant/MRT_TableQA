@@ -7,12 +7,15 @@ import pandas as pd
 from tqdm import tqdm
 
 from tqa.coder.domain.services.column_descriptor_service import ColumnDescriptorService
+from tqa.coder.domain.services.CoderService  import CoderService
+from tqa.coder.domain.services.column_selector_service import ColumnSelectorService
+
 from tqa.coder.domain.services.service import (
-    CoderService,
     ExplainerService,
     InterpreterService,
     RunnerService,
 )
+from tqa.coder.usecases.column_selector_usecase import ColumnSelectorUseCase
 from tqa.coder.usecases.column_description_usecase import ColumnDescriptorUseCase
 from tqa.coder.usecases.interpreter_usecase import InterpretUseCase
 from tqa.coder.usecases.qa_usecase import CoderUseCase, ExplainUseCase, RunnerUseCase
@@ -47,16 +50,20 @@ def run_use_case(
     info_extra = {"info_extra": None}
     if usecase_class == ExplainUseCase:
         info_extra = {"info_extra": uc.used_columns_in_report}
+    if usecase_class == ColumnSelectorUseCase:
+        info_extra = {"columns_descriptions": uc.columns_descriptions}
     return uc.result, info_extra
 
 
 class ProcessTableUseCase(BaseUseCase):
+    
     def __init__(
         self,
         question: str,
         df: pd.DataFrame,
         table_name: str,
         descripter: ColumnDescriptorService,
+        column_selector: ColumnSelectorService,
         explainer: ExplainerService,
         inferer: InferenceService,
         coder: CoderService,
@@ -70,6 +77,7 @@ class ProcessTableUseCase(BaseUseCase):
         self._df = df
         self._table_name = table_name
         self._descripter = descripter
+        self._column_selector = column_selector
         self._explainer = explainer
         self._inferer = inferer
         self._coder = coder
@@ -80,6 +88,7 @@ class ProcessTableUseCase(BaseUseCase):
         self.old_code = None
         self.old_code_exception = None
         self.max_persist = max_persist
+        self.columns_descriptions = None
 
     def _run_module(self, module_name: str, prev_res=None) -> tuple[List | dict, dict]:
         """_summary_
@@ -93,19 +102,35 @@ class ProcessTableUseCase(BaseUseCase):
         """
         match module_name:
             case "descriptor":
-                return run_use_case(
+                result, info_extra = run_use_case(
                     ColumnDescriptorUseCase,
                     self._df,
                     self._descripter,
                     self._inferer,
                     **{"table_name": self._table_name},
                 )
+                self.columns_descriptions = result
+                return result, info_extra
+            case "selector":
+                result, info_extra = run_use_case(
+                    ColumnSelectorUseCase,
+                    self._df,
+                    self._question,
+                    self.columns_descriptions,
+                    self._column_selector,
+                    self._inferer,
+                    **{"table_name": self._table_name},
+                )
+                self._df = result
+                self.columns_descriptions = info_extra.get("columns_descriptions")
+                info_extra = {}
+                return result, info_extra
             case "explainer":
                 return run_use_case(
                     ExplainUseCase,
                     self._question,
                     self._df.columns,
-                    prev_res,
+                    self.columns_descriptions,
                     self._max_steps,
                     self._explainer,
                     self._inferer,
@@ -119,11 +144,19 @@ class ProcessTableUseCase(BaseUseCase):
                     prev_res,
                     self._coder,
                     self._inferer,
+                    self.reporter,
                     self.old_code,
                     self.old_code_exception,
+                    self.columns_descriptions,
                 )
             case "runner":
-                return run_use_case(RunnerUseCase, self._df, prev_res, self._runner)
+                return run_use_case(
+                    RunnerUseCase,
+                    self._df,
+                    prev_res,
+                    self._runner,
+                    self.columns_descriptions,
+                )
             case "interpreter":
                 return run_use_case(
                     InterpretUseCase,
@@ -131,6 +164,7 @@ class ProcessTableUseCase(BaseUseCase):
                     prev_res,
                     self._interpreter,
                     self._inferer,
+                    self.reporter,
                 )
 
     def execute(self):
@@ -147,10 +181,11 @@ class ProcessTableUseCase(BaseUseCase):
         execution = exeContext().get_or_new(
             question=self._question, table_name=self._table_name
         )
+
         exeContext().set_current(exe_id=execution.exe_id)
 
         # module declaration
-        modules = ["descriptor", "explainer", "coder", "runner", "interpreter"]
+        modules = ["descriptor", "selector", "explainer", "coder", "runner", "interpreter"]
 
         prev_res = None
         results = {}
@@ -198,9 +233,9 @@ class ProcessTableUseCase(BaseUseCase):
                         module_name,
                         self._table_name,
                         self._question,
-                        state="Exception:{}".format(e)
-                        if module_name == module
-                        else False,
+                        state=(
+                            "Exception:{}".format(e) if module_name == module else False
+                        ),
                         result=False,
                         runer_out=None,
                         persist_count=persist_count,
@@ -227,10 +262,12 @@ class ProcessTableUseCase(BaseUseCase):
 
         return prev_res
 
+
 class ProcessAllTablesUseCase(BaseUseCase):
     def __init__(
         self,
         descripter: ColumnDescriptorService,
+        column_selector: ColumnSelectorService,
         explainer: ExplainerService,
         inferer: InferenceService,
         coder: CoderService,
@@ -241,6 +278,7 @@ class ProcessAllTablesUseCase(BaseUseCase):
         filter_answer_type: str = None,
     ):
         self._descripter = descripter
+        self._column_selector = column_selector
         self._explainer = explainer
         self._inferer = inferer
         self._coder = coder
@@ -280,7 +318,7 @@ class ProcessAllTablesUseCase(BaseUseCase):
             for d in supervisor_data
             if d.get("exe") is False
         ]
-        
+
         logger.info(
             "tables to process {}/{}".format(
                 len(tables_to_process), len(supervisor_data)
@@ -318,6 +356,7 @@ class ProcessAllTablesUseCase(BaseUseCase):
                         df,
                         dataset_name,
                         self._descripter,
+                        self._column_selector,
                         self._explainer,
                         self._inferer,
                         self._coder,
@@ -374,4 +413,3 @@ class ProcessAllTablesUseCase(BaseUseCase):
                             break
 
         self._result = result_path
-

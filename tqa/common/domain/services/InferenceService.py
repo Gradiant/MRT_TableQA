@@ -7,12 +7,22 @@ from dotenv import load_dotenv
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
-from llama_cpp import Llama
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 
 from tqa.common.configuration.config import load_config
 from tqa.common.domain.entities.ExeContext import exeContext
 from tqa.common.domain.services.Service import Service
+
+# from llama_cpp import Llama
+
+
+class Llama:
+    def __init__(self, *args, **kwargs) -> None:
+        pass
+
+    def __call__(self, *args: Any, **kwds: Any) -> Any:
+        pass
+
 
 load_dotenv()
 
@@ -36,7 +46,6 @@ class InferenceService:
         self.model_registry: Dict[str, InnerInferenceService] = {}
         self.key_matching = {}
         self._load_key_matching_pairs()
-        
 
     def _load_key_matching_pairs(self):
         config = load_config()
@@ -51,19 +60,17 @@ class InferenceService:
         role_system="system",
     ):
         model_identifier = self.key_matching.get(inner_identifier, "default")
-        InnerInferenceService("bypass").logger.info(inner_identifier, model_identifier)
         if model_identifier == "default":
             model_identifier = self.key_matching.get("default")
 
         model = self.model_registry.get(model_identifier, None)
         if model is None:
-            
-            
-            if not load_config().get("llm_inference",{}).get("keep_models",False):
+
+            if not load_config().get("llm_inference", {}).get("keep_models", False):
                 models_registered = list(self.model_registry.keys())
                 for model_registered in models_registered:
                     self._stop_model(model_registered)
-                    
+
             self._start_model(model_identifier)
             model = self.model_registry.get(model_identifier, None)
             if model is None:
@@ -77,7 +84,6 @@ class InferenceService:
     def _stop_model(self, model_identifier: str) -> None:
         # Esto si hace falta al final seguramente haya que mirarlo pq creo que si
         # hay interdependencias no funciona
-        # si estamos en manolito se puede hacer algo mas conservador pq tentemos mucha ram-> self.model_registry[model_identifier].model.to("cpu")
         model = self.model_registry.pop(model_identifier)
         del model
         torch.cuda.empty_cache()
@@ -91,7 +97,8 @@ class InnerInferenceService(Service):
         super().__init__()
         self.use_model = use_model
         self.logger.debug("Use model: {}".format(self.use_model))
-        self.logger.info("MODELO: ", self.use_model)
+        self.logger.info("MODELO: {}".format(self.use_model))
+
         match self.use_model:
             case "bypass":
                 self.model = None
@@ -195,6 +202,15 @@ class InnerInferenceService(Service):
                     model_kwargs={"torch_dtype": "auto"},
                     device_map="auto",
                 )
+            case "qwen_3":
+                _args = self.service_config.get("load_params").get("qwen_25_coder", {})
+                _name = _args.get("model_path").replace(
+                    "{tam}", _args.get("tam", str(14))
+                )
+                self.tokenizer = AutoTokenizer.from_pretrained(_name)
+                self.model = AutoModelForCausalLM.from_pretrained(
+                    _name, torch_dtype="auto", device_map="auto"
+                )
             case _:
                 self.logger.error("No model type {}".format(self.use_model))
                 self.model = None
@@ -224,10 +240,13 @@ class InnerInferenceService(Service):
 
         generated_ids = hf_model.generate(**model_inputs, **config)
 
+        # fmt: off
         generated_ids = [
-            output_ids[len(input_ids) :]
+            output_ids[len(input_ids):]
             for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
         ]
+        # fmt: on
+
         response = hf_tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0]
 
         # devolver a la cpu para no generar basura
@@ -238,6 +257,57 @@ class InnerInferenceService(Service):
         del generated_ids, model_inputs
 
         return response
+
+    def hf_q3_generate(
+        self,
+        hf_model,
+        hf_tokenizer,
+        hf_prompt: str,
+        hf_sysprompt: str,
+        config: Dict[str, Any] = {},
+    ) -> str:
+        messages = [
+            {"role": "system", "content": hf_sysprompt},
+            {"role": "user", "content": hf_prompt},
+        ]
+        try:
+            text = hf_tokenizer.apply_chat_template(
+                messages,
+                tokenize=False,
+                add_generation_prompt=True,
+                enable_thinking=True,
+            )
+        except Exception:
+            text = hf_tokenizer.apply_chat_template(
+                messages[1:],
+                tokenize=False,
+                add_generation_prompt=True,  # no sysprompt
+                enable_thinking=True,
+            )
+
+        model_inputs = hf_tokenizer([text], return_tensors="pt").to(self.model.device)
+
+        # conduct text completion
+        generated_ids = hf_model.generate(**model_inputs, max_new_tokens=32768)
+        input_len = len(model_inputs.input_ids[0])
+
+        output_ids = generated_ids[0][input_len:].tolist()
+
+        # parsing thinking content
+        try:
+            # rindex finding 151668 (</think>)
+            index = len(output_ids) - output_ids[::-1].index(151668)
+        except ValueError:
+            index = 0
+
+        # thinking_content = hf_tokenizer.decode(
+        #    output_ids[:index], skip_special_tokens=True
+        # ).strip("\n")
+        content = hf_tokenizer.decode(
+            output_ids[index:], skip_special_tokens=True
+        ).strip("\n")
+
+        return content
 
     def inference(
         self, prompt: str, role: str = "user", prompt_system="", role_system="system"
@@ -263,7 +333,9 @@ class InnerInferenceService(Service):
                         .get("qwen_25", {})
                         .get(
                             "sysprompt",
-                            "You are a helpfull AI assistant. You answer clearly to what the user provides you. Do not hallucinate. Make sure to follow the isntructions clearly.",
+                            """You are a helpfull AI assistant.
+You answer clearly to what the user provides you.
+Do not hallucinate. Make sure to follow the isntructions clearly.""",
                         )
                     )
 
@@ -284,7 +356,9 @@ class InnerInferenceService(Service):
                     .get("qwen_25_coder", {})
                     .get(
                         "sysprompt",
-                        "You are a helpfull AI assisntant. You answer clearly to what the user provides you. Do not hallucinate. Make sure to follow the isntructions clearly.",
+                        """You are a helpfull AI assisntant.
+You answer clearly to what the user provides you.
+Do not hallucinate. Make sure to follow the isntructions clearly.""",
                     )
                 )
                 _config = (
@@ -295,13 +369,34 @@ class InnerInferenceService(Service):
                 return self.hugginface_instruct_generate(
                     self.model, self.tokenizer, prompt, _sysprompt, _config
                 )
+            case "qwen_3":
+                _sysprompt = (
+                    self.service_config.get("infer_params", {})
+                    .get("qwen_3", {})
+                    .get(
+                        "sysprompt",
+                        """You are a helpfull AI assisntant.
+You answer clearly to what the user provides you.
+Do not hallucinate. Make sure to follow the isntructions clearly.""",
+                    )
+                )
+                _config = (
+                    self.service_config.get("infer_params", {})
+                    .get("qwen_3", {})
+                    .get("config", {})
+                )
+                return self.hf_q3_generate(
+                    self.model, self.tokenizer, prompt, _sysprompt, _config
+                )
             case "zeus_gemma":
                 _sysprompt = (
                     self.service_config.get("infer_params", {})
                     .get("zeus_gemma", {})
                     .get(
                         "sysprompt",
-                        "You are a helpfull AI assisntant. You answer clearly to what the user provides you. Do not hallucinate. Make sure to follow the isntructions clearly.",
+                        """You are a helpfull AI assisntant.
+You answer clearly to what the user provides you.
+Do not hallucinate. Make sure to follow the isntructions clearly.""",
                     )
                 )
                 _config = (
@@ -318,7 +413,10 @@ class InnerInferenceService(Service):
                     .get("gen5_gemma_9", {})
                     .get(
                         "sysprompt",
-                        "You are a helpfull AI assisntant. You answer clearly to what the user provides you. Do not hallucinate. Make sure to follow the isntructions clearly.",
+                        """You are a helpfull AI assisntant.
+You answer clearly to what the user provides you.
+Do not hallucinate.
+Make sure to follow the isntructions clearly.""",
                     )
                 )
                 _config = (
@@ -335,7 +433,9 @@ class InnerInferenceService(Service):
                     .get("gemma_9", {})
                     .get(
                         "sysprompt",
-                        "You are a helpfull AI assisntant. You answer clearly to what the user provides you. Do not hallucinate. Make sure to follow the isntructions clearly.",
+                        """You are a helpfull AI assisntant.
+You answer clearly to what the user provides you.
+Do not hallucinate. Make sure to follow the isntructions clearly.""",
                     )
                 )
                 _config = (
@@ -352,7 +452,10 @@ class InnerInferenceService(Service):
                     .get("phi_4", {})
                     .get(
                         "sysprompt",
-                        "You are a helpfull AI assisntant. You answer clearly to what the user provides you. Do not hallucinate. Make sure to follow the isntructions clearly.",
+                        """You are a helpfull AI assisntant.
+You answer clearly to what the user provides you.
+Do not hallucinate.
+Make sure to follow the isntructions clearly.""",
                     )
                 )
                 _config = (

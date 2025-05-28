@@ -2,18 +2,32 @@ import ast
 import locale
 import os
 import re
-import textwrap
-from lib2to3.refactor import RefactoringTool, get_fixers_from_package
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Union
 
-import autoflake
-import autopep8
 import pandas as pd
+from langchain_core.output_parsers import JsonOutputParser
 from pandas.api.types import is_numeric_dtype
+from thefuzz import process
 
-from tqa.common.domain.services.CoderParserService import CodeParserService
+from tqa.coder.domain.services import coder_internal_functions
+from tqa.common.configuration.logger import get_logger
 from tqa.common.domain.services.Service import Service
-from tqa.common.utils import ensure_path, eval_secure, read_jsonl
+from tqa.common.utils import ensure_path, read_jsonl
+
+logger = get_logger("service")
+
+
+def add_subindex(text, index, list_names):
+
+    for i in range(1000):
+        new_text = text + "_" + str(index)
+        if new_text in list_names:
+            new_text = add_subindex(text, index + 1, list_names)
+            return new_text
+        else:
+            return new_text
+
+    return new_text
 
 
 class ServicePrompting(Service):
@@ -39,32 +53,33 @@ class ServicePrompting(Service):
             else:
                 trash_data = []
 
+
 class FormatterSemevalService(ServicePrompting):
     name = "formatter"
 
     def __init__(self, **kargs):
         super().__init__(**kargs)
-        
-    def format(self,result:str|float|int|list|dict):
-        return self._format_semeval(result)
-        
-    def _format_semeval(self, result: str | list | dict | bool):
-            if isinstance(result, list):
-                return self._try_sub_parse_list(result)
 
-            elif isinstance(result, str):
-                if self._is_int(result):
-                    return int(result)
-                new_res = self._try_number(result)
-                if new_res is None:
-                    return result
-                else:
-                    return new_res
-            elif isinstance(result,tuple):
-                return list(result)
-            else:
+    def format(self, result: str | float | int | list | dict):
+        return self._format_semeval(result)
+
+    def _format_semeval(self, result: str | list | dict | bool):
+        if isinstance(result, list):
+            return self._try_sub_parse_list(result)
+
+        elif isinstance(result, str):
+            if self._is_int(result):
+                return int(result)
+            new_res = self._try_number(result)
+            if new_res is None:
                 return result
+            else:
+                return new_res
+        elif isinstance(result, tuple):
+            return list(result)
+        else:
             return result
+        return result
 
     def _try_sub_parse_list(
         self, list_of_elements: List[str]
@@ -98,7 +113,7 @@ class FormatterSemevalService(ServicePrompting):
 
         # floats tienen prioridad
         if flag_int and flag_num:
-            if all(True if i==f else False for i,f in zip(_list_ints,_list_nums)):
+            if all(True if i == f else False for i, f in zip(_list_ints, _list_nums)):
                 return _list_ints
             else:
                 return _list_nums
@@ -130,10 +145,10 @@ class FormatterSemevalService(ServicePrompting):
             # los type ignore es pq no entiende que hay un try-catch
             if "." in num_str and "," in num_str:
                 num_str = float(num_str.replace(".", "").replace(",", "."))  # type: ignore
-            elif "." in num_str and not "," in num_str:
+            elif "." in num_str and "," not in num_str:
                 num_str = float(num_str)
             else:
-                num_str = float(num)
+                num_str = float(num_str)
             return num_str  # type: ignore
         except ValueError:
             pass
@@ -157,8 +172,8 @@ class FormatterSemevalService(ServicePrompting):
             return True
         except Exception:
             return False
-        
-        
+
+
 class InterpreterService(ServicePrompting):
     name = "interpreter"
 
@@ -178,15 +193,20 @@ class InterpreterService(ServicePrompting):
             raise Exception(f"Exception in interpreter/get_prompt: {e}")
 
     def parse(self, llm_response, return_string=False):
-        
-        if str(llm_response).lower() in ["boolean","string","number","list of string","list of numbers"]:
+
+        if str(llm_response).lower() in [
+            "boolean",
+            "string",
+            "number",
+            "list of string",
+            "list of numbers",
+        ]:
             return llm_response
-        
+
         try:
             eval_response = eval(llm_response)
         except Exception:
             eval_response = None
-            
 
         if eval_response:
             return eval_response
@@ -202,7 +222,7 @@ class InterpreterService(ServicePrompting):
 
             try:
                 final_response = eval(response[0].strip("\n").strip(" "))
-                
+
             except Exception as e:
                 if return_string:
                     return response[0].strip("\n").strip(" ")
@@ -213,8 +233,6 @@ class InterpreterService(ServicePrompting):
         else:
             raise Exception("Nothing parsed")
 
-    
-
 
 class ExplainerService(ServicePrompting):
     name = "explainer"
@@ -222,6 +240,7 @@ class ExplainerService(ServicePrompting):
     def __init__(self, **kargs):
         super().__init__(**kargs)
         self.template_explainer = self.config.get("explainer").get("template")
+        self.use_simple_names = self.config.get("use_simplified_column_names", False)
 
     def get_prompt(
         self,
@@ -231,6 +250,7 @@ class ExplainerService(ServicePrompting):
         max_steps: int,
         max_categories_for_describe: int = 4,
         table_name: str = None,
+        max_columns: int = 10,
     ) -> str:
         try:
             columns_section = self.get_columns_prompt(
@@ -238,10 +258,172 @@ class ExplainerService(ServicePrompting):
             )
             table_name_section = self.get_table_name_section(table_name)
             return self.template_explainer.format(
-                table_name_section, columns_section, question, max_steps
+                table_name_section,
+                columns_section,
+                question,
+                max_steps,
+                column_names[:max_columns].to_string(),
             )
         except Exception as e:
             raise Exception(f"Exception in explainer/get_prompt: {e}")
+
+    def _get_closest_cell_value(
+        self, cell_value: Any, df: pd.DataFrame, threshold: int = 40
+    ):
+
+        all_unique_values = pd.melt(df).value.unique()
+        value_selection = process.extractOne(cell_value, all_unique_values)
+        value = value_selection[0] if value_selection[1] > threshold else None
+
+        return value
+
+    def _filter_columns_by_value(self, df: pd.DataFrame, column: str):
+        """Filter string cells by column value
+
+        df: a pandas Dataframe
+        column : a name of column in the pandas dataframe
+        """
+
+        if column not in df.columns:
+            # try something to find the most similar column
+            column_selection = process.extractOne(column, df.columns)
+            column = column_selection[0]
+            print("Column", column)
+
+        return column
+
+    def _add_reinforce_instructions(self, instruction_list: List, new_value):
+        new_instruction = f"One of the values to use in the filters is '{new_value}' "
+
+        instruction_list.append(new_instruction)
+
+        return instruction_list
+
+    def _add_clarification_instructions(
+        self, instruction_list: List, old_value: str, new_value: str
+    ):
+
+        new_instruction = f"Be careful!. The value {old_value} appears in the database with the following format: '{new_value}' "
+
+        instruction_list.append(new_instruction)
+
+        return instruction_list
+
+    def _replace_instructions(
+        self, instruction_list: List, old_value: str, new_value: str
+    ):
+
+        new_instruction_list = []
+
+        for idx in range(len(instruction_list)):
+
+            _inst = instruction_list[idx]
+
+            if old_value in _inst and new_value not in _inst:
+                _inst = _inst.replace(old_value, new_value)
+
+            new_instruction_list.append(_inst)
+
+        return new_instruction_list
+
+    def apply_fuzzy_correction(self, json_result: Dict, df: pd.DataFrame):
+        """Apply fuzzy correction"""
+
+        # Correct columns
+        if isinstance(json_result, dict) and "columns" in json_result:
+            column_list = json_result["columns"]
+
+            new_column_list = []
+            for _column in column_list:
+                new_column = self._filter_columns_by_value(df, _column)
+                new_column_list.append(new_column)
+
+                if new_column != _column:
+                    logger.info(f"Modify Column {_column} -> {new_column}")
+                    # modify instructions
+                    if "instructions" in json_result:
+                        json_result["instructions"] = self._replace_instructions(
+                            json_result["instructions"], _column, new_column
+                        )
+            json_result["columns"] = new_column_list
+
+            # Correct values (only if there are filtering columns)
+            if isinstance(json_result, dict) and "filter_values" in json_result:
+
+                for _value in json_result["filter_values"]:
+
+                    if isinstance(_value, str):
+                        df_filter = df[json_result["columns"]]
+
+                        new_value = self._get_closest_cell_value(_value, df_filter)
+                        if new_value is None:
+                            new_value = _value
+
+                    else:
+                        new_value = _value
+
+                    if new_value != _value:
+                        logger.info(f"Modify Cell {_value} -> {new_value}")
+
+                        # modify instructions
+                        if "instructions" in json_result:
+                            json_result[
+                                "instructions"
+                            ] = self._add_clarification_instructions(
+                                json_result["instructions"], _value, new_value
+                            )
+
+                    else:
+                        # Modify instructions to add filter values
+                        if "instructions" in json_result:
+                            json_result[
+                                "instructions"
+                            ] = self._add_reinforce_instructions(
+                                json_result["instructions"], new_value
+                            )
+
+                logger.info("Updating cells")
+
+        return json_result
+
+    def add_column_information_to_instructions(
+        self, json_result: Dict, column_description: List[Dict], table_name: str
+    ):
+
+        if (
+            isinstance(json_result, dict)
+            and "columns" in json_result
+            and column_description is not None
+            and "instructions" in json_result
+        ):
+
+            column_list = json_result["columns"]
+
+            for _column in column_list:
+                for _desc_column in column_description.get("columns"):
+                    if _column == _desc_column["name"]:
+                        _type = _desc_column["type"]
+
+                        values = _desc_column["freq_values"]
+
+                        if values is not None:
+
+                            values = [f"{_value}" for _value in values]
+                            joint_values = ", ".join(values)
+
+                            new_instruction = f"""The column '{_column}' is of type '{_type}'
+ and has the following example values: {joint_values} """
+                        else:
+                            new_instruction = (
+                                f"The column '{_column}' is of type '{_type}'"
+                            )
+
+                        logger.info(f"Adding new instruction {new_instruction}")
+
+                        json_result["instructions"].append(new_instruction)
+                        break
+
+        return json_result
 
     def get_prompt_correction(
         self,
@@ -251,15 +433,22 @@ class ExplainerService(ServicePrompting):
         column_descriptions: List[dict],
         max_categories_for_describe: int = 4,
         table_name: str = None,
+        max_columns: int = 10,
     ) -> str:
 
         try:
             columns_section = self.get_columns_prompt(
                 column_names, column_descriptions, max_categories_for_describe
             )
+            logger.info("Explainer Correction prompt")
+
             table_name_section = self.get_table_name_section(table_name)
             return self.template_correction.format(
-                table_name_section, columns_section, question, str(current_prompt)
+                table_name_section,
+                columns_section,
+                question,
+                str(current_prompt),
+                column_names[:max_columns].to_string(),
             )
         except Exception as e:
             raise Exception(f"Exception in explainer/get_prompt: {e}")
@@ -276,11 +465,36 @@ class ExplainerService(ServicePrompting):
             return str(table_columns)
         else:
             columns_section = ""
+            simple_names_used = []
             for column in column_descriptions.get("columns"):
                 options = column.get("freq_values", [])
+                example_values = column.get("example_values", [])
                 unique_values = column.get("unique", 1000)
                 description = column.get("description").get("description")
-                name = column.get("name")
+                simple_name = column.get("description").get("simple_name")
+
+                if (
+                    self.use_simple_names
+                    and simple_name
+                    and simple_name not in simple_names_used
+                ):
+                    name = simple_name
+                    simple_names_used.append(name)
+                elif (
+                    self.use_simple_names
+                    and simple_name
+                    and simple_name in simple_names_used
+                ):
+                    # avoid repeated names of columns
+                    name = add_subindex(simple_name, 1, simple_names_used)
+                    simple_names_used.append(name)
+                else:
+                    name = column.get("name")
+                    if simple_name in simple_names_used:
+                        self.logger.debug(
+                            "Name of simple name already in use: " + str(simple_name)
+                        )
+
                 type_data = column.get("type")
                 min_value = column.get("min")
                 max_value = column.get("max")
@@ -299,6 +513,12 @@ class ExplainerService(ServicePrompting):
                     and options
                     and unique_values > max_categories_show
                 ):
+                    columns_section += (
+                        " Some examples of values for this column are: "
+                        + ", ".join(options)
+                        + "."
+                    )
+                elif type_data == "category" and example_values:
                     columns_section += (
                         " Some examples of values for this column are: "
                         + ", ".join(options)
@@ -358,6 +578,15 @@ class ExplainerService(ServicePrompting):
 
         return list(used_columns)
 
+    def parse_llm_json_answer(self, llm_answer: str):
+
+        logger.info(f"To parse: content Explainer {llm_answer}")
+        parser = JsonOutputParser()
+        next_content = parser.parse(llm_answer)
+        logger.info(f"Parsed content Explainer {next_content}")
+
+        return next_content
+
     def parse_llm_answer(self, llm_answer: str):
         try:
             llm_answer = llm_answer.replace("\n", " ")
@@ -399,14 +628,65 @@ class ExplainerService(ServicePrompting):
         return instructions
 
 
-# import pandas
-class RunnerService:
-    def try_run(self, code: str, df: pd.DataFrame) -> Any:
+class RunnerService(Service):
+    initial_global_vars = {"pd": pd}
+
+    def __init__(self, **kargs):
+        super().__init__(**kargs)
+        self.use_simple_names = self.config.get("use_simplified_column_names", False)
+
+    def _get_internal_functions(self):
+        global_vars = {}
+        for name, value in vars(coder_internal_functions).items():
+            if name.startswith("_") or not callable(value):
+                continue
+            global_vars[name] = getattr(coder_internal_functions, name)
+        import re
+
+        global_vars["re"] = re
+        return dict(self.initial_global_vars, **global_vars)
+
+    def simplify_column_names(
+        self, df: pd.DataFrame, column_descriptions: dict
+    ) -> pd.DataFrame:
+        if not self.use_simple_names or not column_descriptions:
+            return df
+
+        simple_names_used = []
+        for column in column_descriptions.get("columns"):
+            simple_name = column.get("description").get("simple_name")
+            original_name = column.get("name")
+
+            if (
+                self.use_simple_names
+                and simple_name
+                and simple_name not in simple_names_used
+            ):
+                simple_names_used.append(simple_name)
+            elif (
+                self.use_simple_names
+                and simple_name
+                and simple_name in simple_names_used
+            ):
+                # avoid repeated names of columns. Same transformation than in explainer
+                simple_name = add_subindex(simple_name, 1, simple_names_used)
+                simple_names_used.append(simple_name)
+
+            if simple_name and original_name in df.columns:
+                df.rename(columns={original_name: simple_name}, inplace=True)
+
+        return df
+
+    def try_run(
+        self,
+        code: str,
+        df: pd.DataFrame,
+    ) -> Any:
         """
         Can return the result (theoretically conserves te python typing)
         """
         local_vars = {"df": df}
-        global_vars = {"pd": pd}
+        global_vars = self._get_internal_functions()
         try:
             # code = "import pandas\n"+code
             # code = code.replace("pd","pandas")
@@ -419,179 +699,3 @@ class RunnerService:
             raise Exception(f"Exception running code (exec): {e}")
         # print(f"Runner result: {result}")
         return result
-
-
-class CoderService(ServicePrompting):
-    name = "coder"
-
-    def get_prompt(
-        self,
-        dataframe_columns: List[str],
-        list_of_steps: List[str],
-        old_code=None,
-        old_code_error=None,
-    ) -> str:
-        """
-        Returns a prompt for asking for code
-        """
-
-        try:
-
-            if old_code and old_code_error:
-                self.logger.debug("Persiste system active")
-                return self.get("template_persist").format(
-                    dataframe_columns,
-                    "\n".join(
-                        [
-                            str(i) + "." + " " + step
-                            for i, step in enumerate(list_of_steps, start=1)
-                        ]
-                    ),
-                    old_code,
-                    old_code_error,
-                )
-            else:
-                return self.get("template").format(
-                    dataframe_columns,
-                    "\n".join(
-                        [
-                            str(i) + "." + " " + step
-                            for i, step in enumerate(list_of_steps, start=1)
-                        ]
-                    ),
-                )
-        except Exception as e:
-            raise Exception(f"template was not in coder - config {e}")
-
-
-    def try_run(self, code: str) -> Tuple[bool, str]:
-        """
-        DEPRECATED
-
-        Refer to Runner service / use case
-        """
-        ...
-
-    def correction_prompt(self, current_content: str) -> str:
-        """
-        Returns a prompt for correcting the code
-        """
-        try:
-            return self.get("correction_template").format(current_content)
-        except Exception as e:
-            raise Exception(f"correction template was not in coder - config {e}")
-
-    # TODO: revisar el coder parser
-    def parse_llm_answer(self, llm_answer: str):
-        """
-        Parsers the python code from the answer of the llm
-        """
-        try:
-            # imports, functions = self._extract_code_lines(llm_answer)
-            parser = CodeParserService()
-            result = parser.code_parser(llm_answer)
-        except Exception as e:
-            raise Exception(f"python code parsing failed {e}")
-        return result
-        # if len(imports) == 0 and len(functions) == 0:
-        #     raise Exception("No python code was parsed from the answer")
-        # return "\n".join(imports) + "\n" + "\n".join(functions)
-
-    def check_lsp(self, code: str) -> bool:
-        """
-        Checks the syntax in the lsp
-        """
-        works, _ = self._check_ast(code)  # error is expected to be syntax error
-        return works
-
-    def correct_lsp(self, code: str) -> str:
-        """
-        Applies basic syntax corrector
-        """
-        for correction in [
-            self._autopep8_correction,
-            self._autoflake_correction,
-            self._lib23_correction,
-        ]:
-            try:
-                corrected_code = correction(code)
-                code = corrected_code
-            except Exception:
-                # code = code
-                pass
-        return code
-
-    def _extract_code_lines(self, text: str) -> Tuple[List[str], List[str]]:
-        """
-        Returns:
-            - List of import calls
-            - List of functions
-        """
-        # compilamos las 3 regexp
-        python_markdown_code_re = re.compile(r"```python\n(.*?)```")
-        # bloques de funcion
-        # empieza por def, seguido del formato texto(funcion?):
-        # se asegura de que empieze por espacio o tabulador para una nueva linea de la funcion
-        function_block_re = re.compile(r"(def\s+\w+\(.*?\):\n(?:\s+.*\n)*)")
-        # TODO llamada a lo import
-        import_line_re = re.compile(
-            r"(?im)^\s*(from\s+[\w\.]+\s+import\s+[\w\*,\s]*|import\s+[\w\.,\s]+)"
-        )
-
-        # Caso 1, hay markdown de python
-        code_blocks = python_markdown_code_re.findall(text, re.DOTALL)
-
-        # Caso 2, no hay markdown de python
-        if not code_blocks:
-            code_blocks = [text]
-
-        just_code = "\n".join(code_blocks)
-        # buscamos bloques de funcion y bloques de importacion
-        function_blocks = function_block_re.findall(just_code)
-        import_lines = import_line_re.findall(just_code)
-
-        return import_lines, function_blocks
-
-    def _check_ast(self, code: str) -> Tuple[bool, Union[str, None]]:
-        """
-        Intenta parsear el codigo a ast
-        """
-        try:
-            ast.parse(code)
-            return True, None
-        except SyntaxError as e:
-            return False, str(e)
-
-    def _autopep8_correction(self, code_str: str) -> str:
-        """
-        More stetic than functional
-
-        Atuomatically corrects the code based on PEP8 standard
-        """
-        return autopep8.fix_code(code_str)
-
-    def _autoflake_correction(self, code_str: str):
-        """
-        More stetic than functional
-
-        Corrects the code using flake
-        """
-        return autoflake.fix_code(code_str, remove_unused_variables=True)
-
-    def _lib23_correction(self, code_str: str):
-        """
-        Applies a python2 to 3 library for parsing simple errors (i.e. lack of parenthesis)
-        """
-        # Inicias el fixer
-        fixers = get_fixers_from_package("lib2to3.fixes")
-        refactor_tool = RefactoringTool(fixers)
-
-        try:
-            # Devuelve el Arbol Corregido
-            corrected_tree = refactor_tool.refactor_string(code_str, "<string>")
-            corrected_code = str(corrected_tree)
-            return corrected_code
-        except Exception:
-            # No es capaz de corregirlo
-            return code_str
-

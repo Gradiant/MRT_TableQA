@@ -5,7 +5,7 @@ from tqa.common.domain.entities.Dataset import Dataset
 def test_process_one_table():
     dataset_service = Dataset()
     databench = dataset_service.get_data()
-    table_set = databench[4]
+    table_set = databench[0]
     dataset_name = table_set["table_name"]
     question = table_set["questions"][0]["question"]
     df = dataset_service.get_tabular_df(dataset_name)

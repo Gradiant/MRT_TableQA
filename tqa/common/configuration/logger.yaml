@@ -1,5 +1,5 @@
 tests:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
 
@@ -8,48 +8,77 @@ batch_usecase:
   rotation: 2 MB
   retention: 2
 
-usecases:
-  level: ERROR
+service:
+  level: INFO
   rotation: 2 MB
   retention: 2
 
+usecases:
+  level: INFO
+  rotation: 2 MB
+  retention: 2
+
+column_selector:
+  level: INFO
+  rotation: 2 MB
+  retention: 2
+  
+formatter:
+  level: INFO
+  rotation: 2 MB
+  retention: 2
+  
+interpreter:
+  level: INFO
+  rotation: 2 MB
+  retention: 2
 
 da:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
 
 llm_inference:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
  
 explainer:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
 
 column_descriptor:
-  level: ERROR
+  level: INFO
+  rotation: 2 MB
+  retention: 2
+
+column_descriptor:
+  level: INFO
   rotation: 2 MB
   retention: 2
 
 reporter:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
 
 context:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
 
 coder:
-  level: ERROR
+  level: INFO
   rotation: 2 MB
   retention: 2
 
 runner:
-  level: ERROR
+  level: INFO
+  rotation: 2 MB
+  retention: 2
+  
+code_controller:
+  level: INFO
   rotation: 2 MB
   retention: 2

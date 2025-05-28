@@ -1,8 +1,10 @@
 # Table-QA
 
-Code for the task  DataBench, Question-Answering over Tabular Data challenge for the SemEval 2025
+Code for the tasks:
+ - DataBench, Question-Answering over Tabular Data challenge for the SemEval 2025. See tag [v1.0.0](https://github.com/Gradiant/MRT_TableQA/releases/tag/v1.0.0)
+ - IberLEF 2025 Task PRESTA: Preguntas y Respuestas sobre Tablas  en Español (Questions and Answers about Tables in Spanish). See tag  [v2.0.0](https://github.com/Gradiant/MRT_TableQA/releases/tag/v2.0.0)
 
-Detailed descrition of the code and results can be found in the paper <url>
+Detailed descrition of the code and results can be found in the papers <url>
 
 
 # INSTALL
@@ -25,14 +27,18 @@ OPENAI_API_KEY="your_openai_key_here"
 
 ## Overview
 
-Description in more detail than the intro
+This table question answering system implements and strategy that leverages Python code generation with LLMs to interact with the table and get the answer to the questions. 
 
-Musts content that the overview section should contain:
-- Name of the project to which this module belongs (provided it makes sense and is not simply the name of the company)
-- Input data that is handled and data that is generated with the module (on a business level, not technical)
-- Indicate submodules if they exist
-- List of functionalities
+The process is composed of multiple steps: 
+- Understanding the content of the table, selecting the useful columns.
+- Generating instructions natural language in the form of steps needed to get the answer.
+- Translating these instructions to code.
+- Run the code and handle potential errors or exceptions. 
+- Adapting the output to the expected format.
 
+These steps use open source LLMs and fine  grained optimized prompts for each task (step).
+
+<img src="imgs/diagram.png" alt="drawing" width="50%"/>
 
 ## Usage
 

@@ -1,24 +1,22 @@
-from typing import List, Optional
+from typing import List
 
 import pandas as pd
 
-from tqa.coder.domain.services.service import (
-    CoderService,
-    ExplainerService,
-    RunnerService,
-)
-from tqa.common.domain.entities.ExeContext import exeContext
+from tqa.coder.domain.services.CoderService import CoderService
+from tqa.coder.domain.services.service import ExplainerService, RunnerService
+from tqa.common.configuration.logger import get_logger
 from tqa.common.domain.services.InferenceService import InferenceService
 from tqa.common.domain.services.Reporter import Reporter
 from tqa.common.usecases.base import BaseUseCase
-from tqa.common.configuration.logger import get_logger
+
 logger = get_logger("explainer")
+
 
 class ExplainUseCase(BaseUseCase):
     def __init__(
         self,
         question: str,
-        table_columns: list,
+        table_columns: list,  # FIXME: table_columns is really a dataframe. (and it needs to be a dataframe. Refactor the name)
         column_description: dict,
         max_steps: int,
         explainer: ExplainerService,
@@ -26,6 +24,9 @@ class ExplainUseCase(BaseUseCase):
         reporter: Reporter = Reporter(),
         max_categories_for_describe=4,
     ):
+
+        logger.info("Column tables {}".format(table_columns))
+
         super().__init__()
         self.explainer = explainer
         self.question = question
@@ -47,30 +48,74 @@ class ExplainUseCase(BaseUseCase):
             table_name=table_name,
         )
 
+        logger.info("Explainer prompt {}".format(prompt))
+
         try:
             llm_answer = self.inferer.inference(self.explainer.name, prompt)
         except Exception as e:
             raise Exception(f"Exception in explainer/inference: {e}")
 
-        self._result = self.explainer.parse_llm_answer(llm_answer)
+        try:
 
-        self._result = self.explainer._correct_column_names(
-            self._result, self.table_columns
-        )
+            json_result = self.explainer.parse_llm_json_answer(llm_answer)
+
+        except Exception as e:
+            logger.warning(
+                "Error generating instructions, not using json format {}".format(e)
+            )
+            self._result = [llm_answer]
+
+            self.reporter.report_llm_out(
+                "explainer", llm_out=llm_answer, parsed_out=self._result
+            )
+            logger.debug(self._result)
+
+            # Not extracting this columns for report
+            self.used_columns_in_report = []
+
+            return
 
         if self.explainer.config.get("explainer").get("correct_prompt"):
             prompt_correction = self.explainer.get_prompt_correction(
-                self._result,
+                json_result.get("instructions", {}),
                 self.question,
                 self.table_columns,
                 self.column_description,
                 max_categories_for_describe=self.max_categories_for_describe,
                 table_name=table_name,
             )
-            llm_answer_corrected = self.inferer.inference(self.explainer.name, prompt_correction)
-            self._result = self.explainer.parse_llm_answer_corrected(
-                llm_answer_corrected, self._result
+
+            llm_answer_corrected = self.inferer.inference(
+                self.explainer.name, prompt_correction
             )
+
+            try:
+                corrected_json_result = self.explainer.parse_llm_json_answer(
+                    llm_answer_corrected
+                )
+
+                json_result = corrected_json_result
+
+            except Exception as e:
+                logger.warning(
+                    "Error generating instructions (during correction), using format from explainer {}".format(
+                        e
+                    )
+                )
+
+        # FIXME: do fuzzy column names correction
+        json_result = self.explainer.apply_fuzzy_correction(
+            json_result, self.table_columns
+        )
+
+        json_result = self.explainer.add_column_information_to_instructions(
+            json_result, self.column_description, table_name
+        )
+
+        self._result = json_result["instructions"]
+        self._result = self.explainer._correct_column_names(
+            self._result, self.table_columns
+        )
 
         # FIXME: do not know what to do with this (print on screen right now)
         # It might be interesting for filtering the df before the coder or just to check if the explainer is doing its job right
@@ -93,14 +138,16 @@ class RunnerUseCase(BaseUseCase):
         df: pd.DataFrame,
         code_string: str,
         runner: RunnerService,
+        column_descriptions: dict = {},
     ) -> None:
         super().__init__()
         self.df = df
         self.code_string = code_string
         self.runner = runner
+        self.column_descriptions = column_descriptions
 
     def execute(self) -> None:
-
+        self.df = self.runner.simplify_column_names(self.df, self.column_descriptions)
         self._result = self.runner.try_run(self.code_string, self.df)
 
 
@@ -109,13 +156,16 @@ class CoderUseCase(BaseUseCase):
         self,
         table_columns: List[str],
         list_of_steps: list[str],
+        question: str,
         coder: CoderService,
         inferer: InferenceService,
         reporter: Reporter = Reporter(),
         old_code: str = None,
         old_code_exception: str = None,
+        column_descriptions: dict = None,
     ):
         super().__init__()
+        self.question = question
         self.columns = table_columns
         self.list_of_steps = list_of_steps
         self.coder = coder
@@ -124,19 +174,39 @@ class CoderUseCase(BaseUseCase):
         self.reporter = reporter
         self.old_code = old_code
         self.old_code_exception = old_code_exception
+        self.column_descriptions = column_descriptions
 
     def execute_and_separate_lines(self) -> None:
         self.execute()
         self._result = self._result.split("\n")
 
     def execute(self) -> None:
+        class R:
+            def __init__(self) -> None:
+                pass
+
+            def report_llm_out(self, *args, **kwargs):
+                pass
+
+        self.reporter = R()
 
         try:
-            prompt = self.coder.get_prompt(
-                self.columns, self.list_of_steps, self.old_code, self.old_code_exception
+            columns = self.coder.simplify_column_names(
+                self.columns, self.column_descriptions
             )
-            llm_answer = self.inferer.inference(self.coder.name, prompt)
+            prompt = self.coder.get_prompt(
+                self.question,
+                columns,
+                self.list_of_steps,
+                self.old_code,
+                self.old_code_exception,
+            )
 
+            logger.info("Coder Porropompromt {}".format(prompt))
+
+            llm_answer = self.inferer.inference(self.coder.name, prompt)
+            print("MODEL WAS ASKED TO: ", prompt)
+            print("MODEL ANSWERED: ", llm_answer)
             code = self.coder.parse_llm_answer(llm_answer)
             self.reporter.report_llm_out("coder", llm_out=llm_answer, parsed_out=code)
             works = self.coder.check_lsp(code)
