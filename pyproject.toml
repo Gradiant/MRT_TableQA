@@ -23,7 +23,7 @@ dependencies = [
     "langchain>=0.3.23",
     "thefuzz>=0.22.1",
     "llama-cpp-python>=0.3.1",
-    "transformers==4.51.3",
+    "transformers==5.13.0",
     "torch>=2.3.1",    
 ]
 requires-python = ">=3.11,<4.0"
@@ -75,10 +75,7 @@ profile = "black"
 [tool.pytest]
 log_cli = true
 log_level = "DEBUG"
-
-
-[tool.pytest.ini_options]
-addopts = "-s"
+addopts = ["-s"]
 
 # [project.scripts]
 # tqa = "tqa.cli:main"
